@@ -1,0 +1,149 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'dart:async';
+
+import 'widgets.dart';
+import 'package:felangel_weather/repositories/repositories.dart';
+import 'package:felangel_weather/blocs/blocs.dart';
+
+class Weather extends StatefulWidget {
+  final WeatherRepository weatherRepository;
+
+  Weather({Key key, @required this.weatherRepository})
+      : assert(weatherRepository != null),
+        super(key: key);
+
+  @override
+  _WeatherState createState() => _WeatherState();
+}
+
+class _WeatherState extends State<Weather> {
+  WeatherBloc _weatherBloc;
+
+  Completer<void> _refreshCompleter;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshCompleter = Completer<void>();
+    _weatherBloc = WeatherBloc(weatherRepository: widget.weatherRepository);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Temperatura'),
+        actions: <Widget>[
+          IconButton(
+            icon: Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => Settings(),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: Icon(Icons.search),
+            onPressed: () async {
+              final city = await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CitySelection(),
+                ),
+              );
+              if (city != null) {
+                _weatherBloc.dispatch(FetchWeather(city: city));
+              }
+            },
+          )
+        ],
+      ),
+      body: Center(
+        child: BlocListener(
+          bloc: _weatherBloc,
+          listener: (BuildContext context, WeatherState state) {
+            if (state is WeatherLoaded) {
+              BlocProvider.of<ThemeBloc>(context).dispatch(
+                WeatherChanged(condition: state.weather.condition),
+              );
+              _refreshCompleter?.complete();
+              _refreshCompleter = Completer();
+            }
+          },
+          child: BlocBuilder(
+            bloc: _weatherBloc,
+            builder: (_, WeatherState state) {
+              if (state is WeatherEmpty) {
+                return Center(
+                  child: Text('Selecione uma cidade'),
+                );
+              }
+              if (state is WeatherLoading) {
+                return Center(
+                  child: CircularProgressIndicator(),
+                );
+              }
+              if (state is WeatherLoaded) {
+                final weather = state.weather;
+
+                return BlocBuilder(
+                  bloc: BlocProvider.of<ThemeBloc>(context),
+                  builder: (_, ThemeState themeState) {
+                    return GradientContainer(
+                      color: themeState.color,
+                      child: RefreshIndicator(
+                        onRefresh: () {
+                          _weatherBloc.dispatch(
+                            RefreshWeather(city: weather.location),
+                          );
+                          return _refreshCompleter.future;
+                        },
+                        child: ListView(
+                          children: <Widget>[
+                            Padding(
+                              padding: EdgeInsets.only(top: 100),
+                              child: Center(
+                                child: Location(location: weather.location),
+                              ),
+                            ),
+                            Center(
+                              child: LastUpdated(dateTime: weather.lastUpdated),
+                            ),
+                            Padding(
+                              padding: EdgeInsets.symmetric(vertical: 50),
+                              child: Center(
+                                child: CombinedWeatherTemperature(
+                                  weather: weather,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              }
+              if (state is WeatherError) {
+                return Text(
+                  'Algo deu errado! : $state.error',
+                  style: TextStyle(color: Colors.red),
+                );
+              }
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _weatherBloc.dispose();
+    super.dispose();
+  }
+}
